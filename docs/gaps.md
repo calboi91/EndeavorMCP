@@ -624,11 +624,28 @@ _Started 2026-10-06, on the `client-library` branch._
   pass; a panic or a kill skips that. To close: have each test's place end
   what it started when it is dropped, and check for leftovers at the start
   of a run.
-- **`honors_the_mcp_protocol_version_header` failed once.** In one full
-  workspace run (2026-10-06) the `core` test timed out after 20 s waiting for
-  its core's `runtime.json`; five runs after it passed, three of them of that
-  binary alone. Not understood. To close: if it recurs, keep the core's
-  stderr in the failure message.
+- **Two races made a `core` test time out after 20 s waiting for
+  `runtime.json`; both were in the tests, not the core.** Reproduced by
+  running the `core` binary in a loop: 4 failures in 100 runs one at a time,
+  all the first cause; 2 in 200 runs four at a time, both the second.
+  1. A fake Julia that could not start ("Text file busy", os error 26). The
+     test wrote the fake script, and another test thread forked a process
+     while the file was open for writing, which gave the child a copy of the
+     descriptor until it ran its program; running the script in that time
+     fails. `serving_julia` and the failing-Julia fake in `connect.rs` now
+     write the script with a child process (`write_executable`), which no
+     fork can copy. Other tests still write a script with `std::fs::write`
+     and run it in the same test (the fake `ssh`, `squeue`, `uname`, `ps`
+     and Slurm tools); they have the same race and have not failed. To close:
+     use `write_executable` for them.
+  2. The fixed-port test picks its port by binding and dropping it, and
+     another test took the port before the core bound it ("Address already in
+     use"). The helper now notices that the core exited, and the test tries
+     another port, up to five times.
+  Not confirmed: that the earlier failures (`honors_the_mcp_protocol_version_header`
+  on 2026-10-06, and `a_held_call_answers_as_an_event_stream_at_once` in CI on
+  `ubuntu-24.04`) were the first cause. Neither kept the core's stderr. The CI
+  log was not available when this was written.
 - **The launcher's tests don't pass under `busybox sh`.** Four launcher tests
   and one install test fail there because busybox runs its own built-in
   `uname`, `mkdir`, `timeout` and `wget` and ignores the fakes the tests put
